@@ -1,5 +1,5 @@
 import { JwtService } from '@nestjs/jwt';
-import { AuthService } from './auth.service';
+import { AuthService, LoginDto } from './auth.service';
 import { SupabaseService } from '../supabase/supabase.service';
 import { AccountAccessService } from '../access/account-access.service';
 
@@ -46,6 +46,14 @@ describe('Phase 1 account/session flow', () => {
     expect(admin.rpc).toHaveBeenCalledWith('open_account_session', expect.objectContaining({ p_user_id: 'new-user', p_fingerprint: 'os-id', p_client_version: '0.1.0', p_session_hash: expect.stringMatching(/^[a-f0-9]{64}$/) }));
     expect(admin.from).not.toHaveBeenCalled();
     expect(jwt.sign).toHaveBeenCalledWith(expect.objectContaining({ deviceId: 'device-id', sessionTokenHash: expect.any(String) }));
+  });
+  it('rejects a missing JSON body without throwing a TypeError', async () => {
+    const { service, auth } = setup();
+    await expect(service.login(undefined as unknown as LoginDto)).rejects.toMatchObject({
+      status: 400,
+      response: expect.objectContaining({ message: 'Dữ liệu đăng nhập không hợp lệ.' }),
+    });
+    expect(auth.signInWithPassword).not.toHaveBeenCalled();
   });
   it.each(['ACCOUNT_NOT_APPROVED','PROFILE_NOT_FOUND','NO_SUBSCRIPTION','PAID_PLAN_REQUIRED','SUBSCRIPTION_INACTIVE','SUBSCRIPTION_EXPIRED','SUBSCRIPTION_NOT_STARTED','DEVICE_LIMIT_EXCEEDED'])('rejects %s without signing a token', async code => {
     const { service, admin, jwt } = setup();

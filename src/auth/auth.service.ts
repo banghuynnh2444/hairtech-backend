@@ -68,6 +68,9 @@ export class AuthService {
   }
 
   async login(dto: LoginDto) {
+    if (!dto || typeof dto !== 'object') {
+      throw new BadRequestException('Dữ liệu đăng nhập không hợp lệ.');
+    }
     if (typeof dto.deviceFingerprint !== 'string' || !dto.deviceFingerprint.trim() || dto.deviceFingerprint.length > 256) {
       throw new BadRequestException('Không lấy được mã định danh thiết bị. Vui lòng mở ứng dụng desktop.');
     }

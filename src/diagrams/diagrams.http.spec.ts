@@ -5,7 +5,7 @@ import { DiagramsController } from './diagrams.controller';
 import { DiagramsService } from './diagrams.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { LicenseGuard } from '../license/guards/license.guard';
-import { configureDiagramBodyParser } from './diagrams.http';
+import { configureHttpBodyParsers } from './diagrams.http';
 import { sampleProject } from './diagrams.fixture';
 
 describe('Diagrams HTTP contract', () => {
@@ -17,8 +17,8 @@ describe('Diagrams HTTP contract', () => {
     }).overrideGuard(JwtAuthGuard).useValue({ canActivate: (context: any) => {
       context.switchToHttp().getRequest().user = { sub: 'owner' }; return true;
     } }).overrideGuard(LicenseGuard).useValue({ canActivate: () => true }).compile();
-    app = module.createNestApplication();
-    configureDiagramBodyParser(app);
+    app = module.createNestApplication({ bodyParser: false });
+    configureHttpBodyParsers(app);
     await app.init();
   });
   afterAll(async () => { await app.close(); });
