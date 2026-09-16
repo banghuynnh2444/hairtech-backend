@@ -2,6 +2,7 @@ import { JwtService } from '@nestjs/jwt';
 import { AuthService, LoginDto } from './auth.service';
 import { SupabaseService } from '../supabase/supabase.service';
 import { AccountAccessService } from '../access/account-access.service';
+import { ConfigService } from '@nestjs/config';
 
 describe('Phase 1 account/session flow', () => {
   function setup() {
@@ -9,13 +10,26 @@ describe('Phase 1 account/session flow', () => {
     const auth = {
       admin: { createUser: jest.fn().mockResolvedValue({ data: { user } }), deleteUser: jest.fn().mockResolvedValue({}) },
       signInWithPassword: jest.fn().mockResolvedValue({ data: { user } }),
+      resetPasswordForEmail: jest.fn().mockResolvedValue({ error: null }),
+      getUser: jest.fn().mockResolvedValue({ data: { user }, error: null }),
     };
-    const admin = { rpc: jest.fn().mockResolvedValue({ data: 'device-id' }), from: jest.fn() };
+    const deleteEq = jest.fn().mockResolvedValue({ error: null });
+    const admin = {
+      rpc: jest.fn().mockResolvedValue({ data: 'device-id' }),
+      from: jest.fn().mockReturnValue({ delete: () => ({ eq: deleteEq }) }),
+      auth: { admin: { updateUserById: jest.fn().mockResolvedValue({ error: null }) } },
+    };
     const supabase = { createAuthClient: () => ({ auth }), getAdminClient: () => admin };
     const jwt = { sign: jest.fn().mockReturnValue('app-token'), verify: jest.fn().mockReturnValue({ sub: 'new-user', email: user.email, deviceId: 'device-id', sessionTokenHash: 'hash', tokenType: 'refresh' }) };
     const access = { verify: jest.fn().mockResolvedValue('2030-01-01T00:00:00Z') };
-    const service = new AuthService(supabase as unknown as SupabaseService, jwt as unknown as JwtService, access as unknown as AccountAccessService);
-    return { service, auth, admin, jwt, access };
+    const config = { get: jest.fn((key: string) => key === 'PASSWORD_RESET_REDIRECT_URL' ? 'https://api.example.test/auth/reset-password' : undefined) };
+    const service = new AuthService(
+      supabase as unknown as SupabaseService,
+      jwt as unknown as JwtService,
+      access as unknown as AccountAccessService,
+      config as unknown as ConfigService,
+    );
+    return { service, auth, admin, jwt, access, config, deleteEq };
   }
   const registration = { email: 'test@example.invalid', password: 'test-password', salonName: 'Salon' };
   const login = { ...registration, deviceFingerprint: 'os-id', deviceName: 'Windows', platform: 'windows', clientVersion: '0.1.0' };
@@ -38,6 +52,21 @@ describe('Phase 1 account/session flow', () => {
     auth.admin.createUser.mockResolvedValue({ data: {}, error: { message: 'exists' } });
     await expect(service.register(registration)).rejects.toThrow('exists');
     expect(admin.rpc).not.toHaveBeenCalled(); expect(auth.admin.deleteUser).not.toHaveBeenCalled();
+  });
+  it('sends a non-enumerating recovery email to the configured page', async () => {
+    const { service, auth } = setup();
+    await expect(service.forgotPassword(' Test@Example.invalid ')).resolves.toEqual(expect.objectContaining({ success: true }));
+    expect(auth.resetPasswordForEmail).toHaveBeenCalledWith('test@example.invalid', {
+      redirectTo: 'https://api.example.test/auth/reset-password',
+    });
+  });
+  it('updates the password from a verified recovery token and closes app sessions', async () => {
+    const { service, auth, admin, deleteEq } = setup();
+    await expect(service.resetPassword('valid-recovery-access-token', 'new-password-123')).resolves.toEqual(expect.objectContaining({ success: true }));
+    expect(auth.getUser).toHaveBeenCalledWith('valid-recovery-access-token');
+    expect(admin.auth.admin.updateUserById).toHaveBeenCalledWith('new-user', { password: 'new-password-123' });
+    expect(admin.from).toHaveBeenCalledWith('active_sessions');
+    expect(deleteEq).toHaveBeenCalledWith('user_id', 'new-user');
   });
   it('only signs JWT after the atomic eligibility/binding/session RPC succeeds', async () => {
     const { service, admin, jwt, auth } = setup();

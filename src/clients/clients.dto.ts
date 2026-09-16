@@ -1,15 +1,22 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import type { ArgumentMetadata, PipeTransform } from '@nestjs/common';
+import { Allow } from 'class-validator';
 
 export class CreateClientDto {
+  @Allow()
   name: string;
+  @Allow()
   phone?: string | null;
+  @Allow()
   note?: string | null;
 }
 
 export class UpdateClientDto {
+  @Allow()
   name?: string;
+  @Allow()
   phone?: string | null;
+  @Allow()
   note?: string | null;
 }
 

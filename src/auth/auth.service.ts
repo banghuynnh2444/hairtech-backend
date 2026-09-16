@@ -2,26 +2,15 @@ import {
   Injectable, UnauthorizedException, BadRequestException,
   InternalServerErrorException, Logger,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { SupabaseService } from '../supabase/supabase.service';
 import * as crypto from 'crypto';
 import { AccountAccessService, throwAccessError } from '../access/account-access.service';
 import type { JwtPayload } from './jwt.strategy';
+import { LoginDto, RegisterDto } from './auth.dto';
 
-export class RegisterDto {
-  email: string;
-  password: string;
-  salonName: string;
-}
-
-export class LoginDto {
-  email: string;
-  password: string;
-  deviceFingerprint: string;
-  deviceName: string;
-  platform: string;
-  clientVersion?: string;
-}
+export { LoginDto, RegisterDto } from './auth.dto';
 
 @Injectable()
 export class AuthService {
@@ -31,6 +20,7 @@ export class AuthService {
     private readonly supabase: SupabaseService,
     private readonly jwtService: JwtService,
     private readonly access: AccountAccessService,
+    private readonly configService: ConfigService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -63,9 +53,65 @@ export class AuthService {
   }
 
   async forgotPassword(email: string) {
-    const { error } = await this.supabase.createAuthClient().auth.resetPasswordForEmail(email);
-    if (error) throw new BadRequestException(error.message);
-    return { success: true, message: 'Hướng dẫn khôi phục mật khẩu đã gửi về email.' };
+    const redirectTo = this.getPasswordResetRedirectUrl();
+    const { error } = await this.supabase.createAuthClient().auth.resetPasswordForEmail(
+      email.trim().toLowerCase(),
+      { redirectTo },
+    );
+    if (error) {
+      this.logger.warn(`Yêu cầu khôi phục mật khẩu bị từ chối: ${error.code ?? 'unknown'}`);
+      throw new BadRequestException('Chưa thể gửi email khôi phục. Vui lòng chờ một lúc rồi thử lại.');
+    }
+    return {
+      success: true,
+      message: 'Nếu email đã đăng ký, hướng dẫn đặt lại mật khẩu sẽ được gửi trong ít phút.',
+    };
+  }
+
+  async resetPassword(accessToken: string, password: string) {
+    const authClient = this.supabase.createAuthClient();
+    const { data, error: userError } = await authClient.auth.getUser(accessToken);
+    if (userError || !data.user) {
+      throw new BadRequestException('Liên kết khôi phục không hợp lệ hoặc đã hết hạn.');
+    }
+
+    const admin = this.supabase.getAdminClient();
+    const { error: passwordError } = await admin.auth.admin.updateUserById(data.user.id, {
+      password,
+    });
+    if (passwordError) {
+      this.logger.warn(`Không thể cập nhật mật khẩu cho user ${data.user.id}: ${passwordError.code ?? 'unknown'}`);
+      throw new BadRequestException('Chưa thể cập nhật mật khẩu. Vui lòng yêu cầu một liên kết mới.');
+    }
+
+    // Password recovery invalidates the HairTech session immediately. The device
+    // remains bound, so the owner can sign in again without admin intervention.
+    const { error: sessionError } = await admin
+      .from('active_sessions')
+      .delete()
+      .eq('user_id', data.user.id);
+    if (sessionError) {
+      this.logger.warn(`Đã đổi mật khẩu nhưng chưa dọn được phiên app của user ${data.user.id}.`);
+    }
+    return { success: true, message: 'Mật khẩu đã được cập nhật. Bạn có thể quay lại HairTech để đăng nhập.' };
+  }
+
+  private getPasswordResetRedirectUrl(): string {
+    const configured = this.configService.get<string>('PASSWORD_RESET_REDIRECT_URL')?.trim();
+    if (!configured) {
+      throw new InternalServerErrorException('Máy chủ chưa cấu hình trang khôi phục mật khẩu.');
+    }
+    try {
+      const url = new URL(configured);
+      const local = ['localhost', '127.0.0.1'].includes(url.hostname);
+      if ((!local && url.protocol !== 'https:') || (local && !['http:', 'https:'].includes(url.protocol))) {
+        throw new Error('Unsafe protocol');
+      }
+      url.hash = '';
+      return url.toString();
+    } catch {
+      throw new InternalServerErrorException('PASSWORD_RESET_REDIRECT_URL không hợp lệ.');
+    }
   }
 
   async login(dto: LoginDto) {

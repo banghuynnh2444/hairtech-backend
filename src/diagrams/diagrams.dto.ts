@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import type { ArgumentMetadata, PipeTransform } from '@nestjs/common';
+import { Allow } from 'class-validator';
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 export type JsonObject = { [key: string]: JsonValue };
@@ -18,19 +19,31 @@ export interface ProjectDataV1 {
 }
 
 export class CreateDiagramDto {
+  @Allow()
   client_id?: string | null;
+  @Allow()
   type: string;
+  @Allow()
   name: string;
+  @Allow()
   notes?: string | null;
+  @Allow()
   thumbnail_url?: string | null;
+  @Allow()
   project_data: ProjectDataV1;
 }
 export class UpdateDiagramDto {
+  @Allow()
   client_id?: string | null;
+  @Allow()
   type?: string;
+  @Allow()
   name?: string;
+  @Allow()
   notes?: string | null;
+  @Allow()
   thumbnail_url?: string | null;
+  @Allow()
   project_data?: ProjectDataV1;
 }
 

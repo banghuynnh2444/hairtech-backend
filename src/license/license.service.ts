@@ -1,9 +1,12 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
+import { IsString, Length } from 'class-validator';
 import { AccountAccessService } from '../access/account-access.service';
 
 export class HeartbeatDto {
+  @IsString({ message: 'Thiếu mã định danh thiết bị.' })
+  @Length(1, 256, { message: 'Mã định danh thiết bị không hợp lệ.' })
   deviceFingerprint: string;
 }
 
