@@ -1,7 +1,13 @@
 import { randomUUID } from 'node:crypto';
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
 import { CreateClientDto, UpdateClientDto } from './clients.dto';
+
+const CLIENT_COLUMNS = 'id,user_id,name,phone,note,created_at,updated_at';
 
 @Injectable()
 export class ClientsService {
@@ -11,7 +17,7 @@ export class ClientsService {
     const client = this.supabase.getAdminClient();
     const { data, error } = await client
       .from('clients')
-      .select('*')
+      .select(CLIENT_COLUMNS)
       .eq('user_id', userId)
       .order('created_at', { ascending: false });
 
@@ -23,27 +29,29 @@ export class ClientsService {
     const client = this.supabase.getAdminClient();
     const { data, error } = await client
       .from('clients')
-      .select('*')
+      .select(CLIENT_COLUMNS)
       .eq('id', id)
       .eq('user_id', userId)
       .maybeSingle();
 
     if (error) throw error;
-    if (!data) throw new NotFoundException('Không tìm thấy thông tin khách hàng');
+    if (!data)
+      throw new NotFoundException('Không tìm thấy thông tin khách hàng');
     return data;
   }
 
   async create(dto: CreateClientDto, userId: string) {
-    this.validateFields(dto);
     const client = this.supabase.getAdminClient();
     const { data, error } = await client
       .from('clients')
       .insert({
         id: randomUUID(),
         name: dto.name,
+        phone: dto.phone ?? null,
+        note: dto.note ?? null,
         user_id: userId,
       })
-      .select()
+      .select(CLIENT_COLUMNS)
       .single();
 
     if (error) throw error;
@@ -51,27 +59,24 @@ export class ClientsService {
   }
 
   async update(id: string, dto: UpdateClientDto, userId: string) {
-    this.validateFields(dto);
     await this.findOne(id, userId); // Kiểm tra quyền sở hữu
     const client = this.supabase.getAdminClient();
+    const fields: Record<string, unknown> = {};
+    if (dto.name !== undefined) fields.name = dto.name;
+    if (dto.phone !== undefined) fields.phone = dto.phone;
+    if (dto.note !== undefined) fields.note = dto.note;
     const { data, error } = await client
       .from('clients')
-      .update({
-        name: dto.name,
-      })
+      .update(fields)
       .eq('id', id)
       .eq('user_id', userId)
-      .select()
-      .single();
+      .select(CLIENT_COLUMNS)
+      .maybeSingle();
 
     if (error) throw error;
+    if (!data)
+      throw new NotFoundException('Không tìm thấy thông tin khách hàng');
     return data;
-  }
-
-  private validateFields(dto: CreateClientDto | UpdateClientDto) {
-    if (dto.phone !== undefined || dto.note !== undefined) {
-      throw new BadRequestException('Schema clients hiện chỉ hỗ trợ tên khách hàng, chưa có phone hoặc note.');
-    }
   }
 
   async delete(id: string, userId: string) {
@@ -83,7 +88,15 @@ export class ClientsService {
       .eq('id', id)
       .eq('user_id', userId);
 
-    if (error) throw error;
+    if (error) {
+      if (error.code === '23503') {
+        throw new ConflictException({
+          code: 'CLIENT_HAS_PROJECTS',
+          message: 'Hãy xóa các project của khách hàng trước khi xóa hồ sơ.',
+        });
+      }
+      throw error;
+    }
     return { success: true, message: 'Đã xóa khách hàng' };
   }
 }

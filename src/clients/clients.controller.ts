@@ -8,14 +8,20 @@ import {
   Param,
   Req,
   UseGuards,
+  UsePipes,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { LicenseGuard } from '../license/guards/license.guard';
 import { ClientsService } from './clients.service';
-import { CreateClientDto, UpdateClientDto } from './clients.dto';
+import {
+  ClientValidationPipe,
+  CreateClientDto,
+  UpdateClientDto,
+} from './clients.dto';
 
 @Controller('clients')
 @UseGuards(JwtAuthGuard, LicenseGuard)
+@UsePipes(ClientValidationPipe)
 export class ClientsController {
   constructor(private readonly clientsService: ClientsService) {}
 
