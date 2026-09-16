@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(process.env.HAIRTECH_SQL_TEST_RUNTIME || import.meta.url);
 const { PGlite } = require('@electric-sql/pglite');
 const migration = fs.readFileSync(new URL('../migrations/20260916_diagrams_contract.sql', import.meta.url), 'utf8');
+const preserveProjects = fs.readFileSync(new URL('../migrations/20260917_preserve_client_projects.sql', import.meta.url), 'utf8');
 const security = fs.readFileSync(new URL('../migrations/20260915_security_fix.sql', import.meta.url), 'utf8');
 const owner = '11111111-1111-4111-8111-111111111111';
 const other = '22222222-2222-4222-8222-222222222222';
@@ -25,7 +26,7 @@ async function database(alternate = false) {
     CREATE TABLE devices(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid, device_fingerprint text, device_name text, platform text, last_seen timestamptz);
     CREATE TABLE active_sessions(user_id uuid);
     CREATE TABLE clients(id text PRIMARY KEY, user_id uuid NOT NULL, name text NOT NULL);
-    CREATE TABLE diagrams(id text PRIMARY KEY, user_id uuid NOT NULL, client_id text REFERENCES clients(id),
+    CREATE TABLE diagrams(id text PRIMARY KEY, user_id uuid NOT NULL, client_id text REFERENCES clients(id) ON DELETE CASCADE,
       ${alternate ? 'title text NOT NULL, data jsonb NOT NULL, created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now()'
       : 'type text NOT NULL, name text NOT NULL, notes text, image text, history_data jsonb, timestamp bigint NOT NULL'});
     INSERT INTO clients VALUES ('c1','${owner}','One'),('c2','${other}','Two');
@@ -41,6 +42,7 @@ await db.query('INSERT INTO diagrams VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)',
   ['d2', other, 'c2', '3d', 'Second', null, 'https://example.invalid/t.png', '{}', 1789516800456]);
 const before = (await db.query('SELECT to_jsonb(d) AS row FROM diagrams d ORDER BY id')).rows;
 await db.exec(migration);
+await db.exec(preserveProjects);
 const rows = (await db.query('SELECT to_jsonb(d) AS row FROM diagrams d ORDER BY id')).rows;
 for (let i = 0; i < before.length; i++) for (const [key, value] of Object.entries(before[i].row)) assert.deepEqual(rows[i].row[key], value);
 assert.equal(rows.length, before.length);
@@ -76,6 +78,9 @@ await assert.rejects(db.query('INSERT INTO diagrams(id,user_id,client_id,type,na
   ['bad-link', owner, 'c2', '3d', 'Bad', JSON.stringify(project)]), /foreign key/i);
 await assert.rejects(db.exec("UPDATE diagrams SET client_id='c2' WHERE id='new'"), /foreign key/i);
 ok('database rejects cross-owner client links on create and update');
+await assert.rejects(db.exec("DELETE FROM clients WHERE id='c1'"), /foreign key/i);
+assert.equal((await db.query("SELECT count(*)::int AS n FROM diagrams WHERE client_id='c1'")).rows[0].n, 2);
+ok('deleting a customer is blocked while its projects still exist');
 await assert.rejects(db.exec("UPDATE diagrams SET project_data='{}' WHERE id='new'"), /check constraint/i);
 await assert.rejects(db.exec("UPDATE diagrams SET project_data='{\"version\":2}' WHERE id='new'"), /check constraint/i);
 ok('database rejects missing and unsupported project versions');
@@ -91,6 +96,7 @@ ok('anonymous access remains denied');
 await db.exec("UPDATE diagrams SET thumbnail_url=NULL WHERE id='d2'");
 const cleared = (await db.query("SELECT updated_at FROM diagrams WHERE id='d2'")).rows[0].updated_at;
 await db.exec(migration);
+await db.exec(preserveProjects);
 const stillCleared = (await db.query("SELECT thumbnail_url,updated_at FROM diagrams WHERE id='d2'")).rows[0];
 assert.equal(stillCleared.thumbnail_url, null);
 assert.equal(stillCleared.updated_at.getTime(), cleared.getTime());
@@ -101,6 +107,7 @@ const alt = await database(true);
 await alt.query('INSERT INTO diagrams(id,user_id,client_id,title,data,created_at) VALUES ($1,$2,$3,$4,$5,$6)',
   ['alt', owner, 'c1', 'Old title', JSON.stringify({ nodes: [1, 2, 3] }), '2020-01-02T03:04:05Z']);
 await alt.exec(migration);
+await alt.exec(preserveProjects);
 const converted = (await alt.query("SELECT * FROM diagrams WHERE id='alt'")).rows[0];
 assert.equal(converted.name, 'Old title');
 assert.equal(converted.type, 'legacy');

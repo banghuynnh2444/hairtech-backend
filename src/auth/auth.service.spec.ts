@@ -8,7 +8,11 @@ describe('Phase 1 account/session flow', () => {
   function setup() {
     const user = { id: 'new-user', email: 'test@example.invalid' };
     const auth = {
-      admin: { createUser: jest.fn().mockResolvedValue({ data: { user } }), deleteUser: jest.fn().mockResolvedValue({}) },
+      admin: {
+        createUser: jest.fn().mockResolvedValue({ data: { user } }),
+        deleteUser: jest.fn().mockResolvedValue({}),
+        updateUserById: jest.fn().mockResolvedValue({ error: null }),
+      },
       signInWithPassword: jest.fn().mockResolvedValue({ data: { user } }),
       resetPasswordForEmail: jest.fn().mockResolvedValue({ error: null }),
       getUser: jest.fn().mockResolvedValue({ data: { user }, error: null }),
@@ -17,7 +21,6 @@ describe('Phase 1 account/session flow', () => {
     const admin = {
       rpc: jest.fn().mockResolvedValue({ data: 'device-id' }),
       from: jest.fn().mockReturnValue({ delete: () => ({ eq: deleteEq }) }),
-      auth: { admin: { updateUserById: jest.fn().mockResolvedValue({ error: null }) } },
     };
     const supabase = { createAuthClient: () => ({ auth }), getAdminClient: () => admin };
     const jwt = { sign: jest.fn().mockReturnValue('app-token'), verify: jest.fn().mockReturnValue({ sub: 'new-user', email: user.email, deviceId: 'device-id', sessionTokenHash: 'hash', tokenType: 'refresh' }) };
@@ -64,7 +67,7 @@ describe('Phase 1 account/session flow', () => {
     const { service, auth, admin, deleteEq } = setup();
     await expect(service.resetPassword('valid-recovery-access-token', 'new-password-123')).resolves.toEqual(expect.objectContaining({ success: true }));
     expect(auth.getUser).toHaveBeenCalledWith('valid-recovery-access-token');
-    expect(admin.auth.admin.updateUserById).toHaveBeenCalledWith('new-user', { password: 'new-password-123' });
+    expect(auth.admin.updateUserById).toHaveBeenCalledWith('new-user', { password: 'new-password-123' });
     expect(admin.from).toHaveBeenCalledWith('active_sessions');
     expect(deleteEq).toHaveBeenCalledWith('user_id', 'new-user');
   });

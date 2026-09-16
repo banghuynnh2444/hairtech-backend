@@ -75,8 +75,7 @@ export class AuthService {
       throw new BadRequestException('Liên kết khôi phục không hợp lệ hoặc đã hết hạn.');
     }
 
-    const admin = this.supabase.getAdminClient();
-    const { error: passwordError } = await admin.auth.admin.updateUserById(data.user.id, {
+    const { error: passwordError } = await authClient.auth.admin.updateUserById(data.user.id, {
       password,
     });
     if (passwordError) {
@@ -86,7 +85,7 @@ export class AuthService {
 
     // Password recovery invalidates the HairTech session immediately. The device
     // remains bound, so the owner can sign in again without admin intervention.
-    const { error: sessionError } = await admin
+    const { error: sessionError } = await this.supabase.getAdminClient()
       .from('active_sessions')
       .delete()
       .eq('user_id', data.user.id);
