@@ -21,6 +21,7 @@ describe('Auth HTTP contract', () => {
           useValue: {
             register: jest.fn(),
             login,
+            refresh: jest.fn(),
             forgotPassword: jest.fn(),
             session: jest.fn(),
             logout: jest.fn(),

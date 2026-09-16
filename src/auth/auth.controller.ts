@@ -16,6 +16,14 @@ export class AuthController {
     return this.authService.login(body);
   }
 
+  @Post('refresh')
+  refresh(
+    @Headers('authorization') authorization: string | undefined,
+    @Body('deviceFingerprint') fingerprint: unknown,
+  ) {
+    return this.authService.refresh(authorization, fingerprint);
+  }
+
   @Post('forgot-password')
   async forgotPassword(@Body('email') email: string) {
     return this.authService.forgotPassword(email);

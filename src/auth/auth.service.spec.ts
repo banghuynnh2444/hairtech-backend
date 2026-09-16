@@ -12,7 +12,7 @@ describe('Phase 1 account/session flow', () => {
     };
     const admin = { rpc: jest.fn().mockResolvedValue({ data: 'device-id' }), from: jest.fn() };
     const supabase = { createAuthClient: () => ({ auth }), getAdminClient: () => admin };
-    const jwt = { sign: jest.fn().mockReturnValue('app-token'), verify: jest.fn().mockReturnValue({ sub: 'new-user', sessionTokenHash: 'hash' }) };
+    const jwt = { sign: jest.fn().mockReturnValue('app-token'), verify: jest.fn().mockReturnValue({ sub: 'new-user', email: user.email, deviceId: 'device-id', sessionTokenHash: 'hash', tokenType: 'refresh' }) };
     const access = { verify: jest.fn().mockResolvedValue('2030-01-01T00:00:00Z') };
     const service = new AuthService(supabase as unknown as SupabaseService, jwt as unknown as JwtService, access as unknown as AccountAccessService);
     return { service, auth, admin, jwt, access };
@@ -41,11 +41,12 @@ describe('Phase 1 account/session flow', () => {
   });
   it('only signs JWT after the atomic eligibility/binding/session RPC succeeds', async () => {
     const { service, admin, jwt, auth } = setup();
-    await expect(service.login(login)).resolves.toMatchObject({ accessToken: 'app-token' });
+    await expect(service.login(login)).resolves.toMatchObject({ accessToken: 'app-token', refreshToken: 'app-token' });
     expect(auth.signInWithPassword).toHaveBeenCalledWith({ email: login.email, password: login.password });
     expect(admin.rpc).toHaveBeenCalledWith('open_account_session', expect.objectContaining({ p_user_id: 'new-user', p_fingerprint: 'os-id', p_client_version: '0.1.0', p_session_hash: expect.stringMatching(/^[a-f0-9]{64}$/) }));
     expect(admin.from).not.toHaveBeenCalled();
-    expect(jwt.sign).toHaveBeenCalledWith(expect.objectContaining({ deviceId: 'device-id', sessionTokenHash: expect.any(String) }));
+    expect(jwt.sign).toHaveBeenCalledWith(expect.objectContaining({ deviceId: 'device-id', sessionTokenHash: expect.any(String), tokenType: 'access' }));
+    expect(jwt.sign).toHaveBeenCalledWith(expect.objectContaining({ tokenType: 'refresh' }), { expiresIn: '30d' });
   });
   it('rejects a missing JSON body without throwing a TypeError', async () => {
     const { service, auth } = setup();
@@ -90,6 +91,19 @@ describe('Phase 1 account/session flow', () => {
     const { service, access } = setup();
     await expect(service.session({ sub: 'u', sessionTokenHash: 'h', deviceId: 'd' }, 'fp')).resolves.toMatchObject({ valid: true });
     expect(access.verify).toHaveBeenCalledWith('u','h','d','fp');
+  });
+  it('renews a short access token only with a valid refresh token and active session', async () => {
+    const { service, access, jwt } = setup();
+    await expect(service.refresh('Bearer refresh-token', 'fp')).resolves.toEqual({ accessToken: 'app-token' });
+    expect(jwt.verify).toHaveBeenCalledWith('refresh-token');
+    expect(access.verify).toHaveBeenCalledWith('new-user', 'hash', 'device-id', 'fp', true);
+    expect(jwt.sign).toHaveBeenCalledWith(expect.objectContaining({ tokenType: 'access', deviceId: 'device-id' }));
+  });
+  it('rejects access tokens at the refresh endpoint', async () => {
+    const { service, access, jwt } = setup();
+    jwt.verify.mockReturnValue({ sub: 'new-user', deviceId: 'device-id', sessionTokenHash: 'hash', tokenType: 'access' });
+    await expect(service.refresh('Bearer access-token', 'fp')).rejects.toMatchObject({ status: 401 });
+    expect(access.verify).not.toHaveBeenCalled();
   });
   it('allows a signed expired token only for logout of its own session', async () => {
     const { service, admin, jwt } = setup();

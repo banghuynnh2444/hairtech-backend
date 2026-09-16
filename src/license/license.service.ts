@@ -9,37 +9,48 @@ export class HeartbeatDto {
 
 @Injectable()
 export class LicenseService {
-  private readonly signingKey: string;
+  private readonly privateKey: crypto.KeyObject;
 
   constructor(
     private readonly configService: ConfigService,
     private readonly access: AccountAccessService,
   ) {
-    const signingKey = this.configService.get<string>('LICENSE_SIGNING_KEY')?.trim();
-    if (!signingKey || signingKey === 'hairtech_offline_license_secret_key_32bytes_min!') {
-      throw new Error('Thiếu LICENSE_SIGNING_KEY riêng trong cấu hình backend.');
+    const encodedKey = this.configService.get<string>('LICENSE_PRIVATE_KEY')?.trim();
+    if (!encodedKey) {
+      throw new Error('Thiếu LICENSE_PRIVATE_KEY Ed25519 trong cấu hình backend.');
     }
-    this.signingKey = signingKey;
+    try {
+      this.privateKey = crypto.createPrivateKey({
+        key: Buffer.from(encodedKey, 'base64url'), format: 'der', type: 'pkcs8',
+      });
+      if (this.privateKey.asymmetricKeyType !== 'ed25519') throw new Error('Wrong key type');
+    } catch {
+      throw new Error('LICENSE_PRIVATE_KEY phải là private key Ed25519 PKCS8 dạng base64url.');
+    }
   }
 
   async processHeartbeat(userId: string, sessionTokenHash: string, deviceFingerprint: string, deviceId: string) {
     if (typeof deviceFingerprint !== 'string' || !deviceFingerprint.trim()) {
       throw new UnauthorizedException('Thiếu mã định danh thiết bị.');
     }
-    const expiry = await this.access.verify(userId, sessionTokenHash, deviceId, deviceFingerprint.trim(), true);
+    const fingerprint = deviceFingerprint.trim();
+    const expiry = await this.access.verify(userId, sessionTokenHash, deviceId, fingerprint, true);
+    const now = Math.floor(Date.now() / 1000);
+    const subscriptionExpiresAt = Math.floor(Date.parse(expiry) / 1000);
 
     const offlinePayload = {
+      version: 1,
       sub: userId,
-      fp: deviceFingerprint,
-      validUntil: Math.min(Math.floor(Date.now() / 1000) + 72 * 3600, Math.floor(Date.parse(expiry) / 1000)),
+      deviceId,
+      fp: fingerprint,
+      issuedAt: now,
+      validUntil: Math.min(now + 72 * 3600, subscriptionExpiresAt),
+      subscriptionExpiresAt,
       nonce: crypto.randomBytes(16).toString('hex'),
     };
 
     const serialized = JSON.stringify(offlinePayload);
-    const signature = crypto
-      .createHmac('sha256', this.signingKey)
-      .update(serialized)
-      .digest('base64url');
+    const signature = crypto.sign(null, Buffer.from(serialized), this.privateKey).toString('base64url');
 
     return {
       status: 'healthy',

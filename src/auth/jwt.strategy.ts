@@ -7,9 +7,9 @@ import { requiredJwtSecret } from './jwt-config';
 export interface JwtPayload {
   sub: string;
   email: string;
-  role: string;
   deviceId: string;
   sessionTokenHash: string;
+  tokenType: 'access' | 'refresh';
 }
 
 @Injectable()
@@ -23,7 +23,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: JwtPayload) {
-    if (!payload || !payload.sub) {
+    if (!payload || !payload.sub || payload.tokenType !== 'access') {
       throw new UnauthorizedException('Token không hợp lệ');
     }
     return payload; // Gắn dữ liệu giải mã vào req.user

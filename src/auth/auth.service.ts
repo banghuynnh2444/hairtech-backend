@@ -6,6 +6,7 @@ import { JwtService } from '@nestjs/jwt';
 import { SupabaseService } from '../supabase/supabase.service';
 import * as crypto from 'crypto';
 import { AccountAccessService, throwAccessError } from '../access/account-access.service';
+import type { JwtPayload } from './jwt.strategy';
 
 export class RegisterDto {
   email: string;
@@ -101,9 +102,40 @@ export class AuthService {
     });
     if (sessionError || !deviceId) throwAccessError(sessionError);
 
+    const claims = { sub: userId, email: authData.user.email, deviceId, sessionTokenHash };
     return {
-      accessToken: this.jwtService.sign({ sub: userId, email: authData.user.email, deviceId, sessionTokenHash }),
+      accessToken: this.jwtService.sign({ ...claims, tokenType: 'access' }),
+      refreshToken: this.jwtService.sign({ ...claims, tokenType: 'refresh' }, { expiresIn: '30d' }),
       user: { id: userId, email: authData.user.email },
+    };
+  }
+
+  async refresh(authorization: string | undefined, fingerprint: unknown) {
+    if (typeof fingerprint !== 'string' || !fingerprint.trim() || fingerprint.length > 256) {
+      throw new BadRequestException('Thiếu mã định danh thiết bị.');
+    }
+    const token = authorization?.match(/^Bearer (\S+)$/i)?.[1];
+    if (!token) throw new UnauthorizedException('Thiếu refresh token.');
+
+    let payload: JwtPayload;
+    try {
+      payload = this.jwtService.verify<JwtPayload>(token);
+      if (payload.tokenType !== 'refresh' || !payload.sub || !payload.sessionTokenHash || !payload.deviceId) {
+        throw new Error('Invalid refresh token');
+      }
+    } catch {
+      throw new UnauthorizedException('Refresh token không hợp lệ hoặc đã hết hạn.');
+    }
+
+    await this.access.verify(payload.sub, payload.sessionTokenHash, payload.deviceId, fingerprint.trim(), true);
+    return {
+      accessToken: this.jwtService.sign({
+        sub: payload.sub,
+        email: payload.email,
+        deviceId: payload.deviceId,
+        sessionTokenHash: payload.sessionTokenHash,
+        tokenType: 'access',
+      }),
     };
   }
 
