@@ -1,7 +1,7 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { SupabaseService } from '../supabase/supabase.service';
 import * as crypto from 'crypto';
+import { AccountAccessService } from '../access/account-access.service';
 
 export class HeartbeatDto {
   deviceFingerprint: string;
@@ -12,8 +12,8 @@ export class LicenseService {
   private readonly signingKey: string;
 
   constructor(
-    private readonly supabase: SupabaseService,
     private readonly configService: ConfigService,
+    private readonly access: AccountAccessService,
   ) {
     const signingKey = this.configService.get<string>('LICENSE_SIGNING_KEY')?.trim();
     if (!signingKey || signingKey === 'hairtech_offline_license_secret_key_32bytes_min!') {
@@ -22,39 +22,16 @@ export class LicenseService {
     this.signingKey = signingKey;
   }
 
-  async processHeartbeat(userId: string, sessionTokenHash: string, deviceFingerprint: string) {
+  async processHeartbeat(userId: string, sessionTokenHash: string, deviceFingerprint: string, deviceId: string) {
     if (typeof deviceFingerprint !== 'string' || !deviceFingerprint.trim()) {
       throw new UnauthorizedException('Thiếu mã định danh thiết bị.');
     }
-    const adminClient = this.supabase.getAdminClient();
-
-    const { data: session, error } = await adminClient
-      .from('active_sessions')
-      .update({ last_heartbeat: new Date().toISOString() })
-      .eq('user_id', userId)
-      .eq('session_token_hash', sessionTokenHash)
-      .select('id, device_id')
-      .maybeSingle();
-
-    if (error || !session) {
-      throw new UnauthorizedException({
-        code: 'SESSION_TERMINATED',
-        message: 'Phiên làm việc đã bị hủy từ máy khác.',
-      });
-    }
-
-    const { data: device, error: deviceError } = await adminClient
-      .from('devices').select('id')
-      .eq('id', session.device_id).eq('user_id', userId)
-      .eq('device_fingerprint', deviceFingerprint).maybeSingle();
-    if (deviceError || !device) {
-      throw new UnauthorizedException('Thiết bị không khớp phiên đăng nhập.');
-    }
+    const expiry = await this.access.verify(userId, sessionTokenHash, deviceId, deviceFingerprint.trim(), true);
 
     const offlinePayload = {
       sub: userId,
       fp: deviceFingerprint,
-      validUntil: Math.floor(Date.now() / 1000) + 72 * 3600,
+      validUntil: Math.min(Math.floor(Date.now() / 1000) + 72 * 3600, Math.floor(Date.parse(expiry) / 1000)),
       nonce: crypto.randomBytes(16).toString('hex'),
     };
 

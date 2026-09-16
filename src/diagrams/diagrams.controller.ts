@@ -8,14 +8,16 @@ import {
   Param,
   Req,
   UseGuards,
+  UsePipes,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { LicenseGuard } from '../license/guards/license.guard';
 import { DiagramsService } from './diagrams.service';
-import { CreateDiagramDto, UpdateDiagramDto } from './diagrams.dto';
+import { CreateDiagramDto, UpdateDiagramDto, DiagramValidationPipe } from './diagrams.dto';
 
 @Controller('diagrams')
 @UseGuards(JwtAuthGuard, LicenseGuard)
+@UsePipes(DiagramValidationPipe)
 export class DiagramsController {
   constructor(private readonly diagramsService: DiagramsService) {}
 

@@ -7,11 +7,13 @@ import { AuthModule } from './auth/auth.module';
 import { LicenseModule } from './license/license.module';
 import { ClientsModule } from './clients/clients.module';
 import { DiagramsModule } from './diagrams/diagrams.module';
+import { AccountAccessModule } from './access/account-access.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     SupabaseModule,
+    AccountAccessModule,
     AuthModule,
     LicenseModule,
     ClientsModule,

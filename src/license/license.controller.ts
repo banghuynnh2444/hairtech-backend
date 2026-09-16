@@ -13,6 +13,7 @@ export class LicenseController {
       req.user.sub,
       req.user.sessionTokenHash,
       body.deviceFingerprint,
+      req.user.deviceId,
     );
   }
 }

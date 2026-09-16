@@ -5,6 +5,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { SupabaseService } from '../supabase/supabase.service';
 import * as crypto from 'crypto';
+import { AccountAccessService, throwAccessError } from '../access/account-access.service';
 
 export class RegisterDto {
   email: string;
@@ -18,6 +19,7 @@ export class LoginDto {
   deviceFingerprint: string;
   deviceName: string;
   platform: string;
+  clientVersion?: string;
 }
 
 @Injectable()
@@ -27,6 +29,7 @@ export class AuthService {
   constructor(
     private readonly supabase: SupabaseService,
     private readonly jwtService: JwtService,
+    private readonly access: AccountAccessService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -40,8 +43,8 @@ export class AuthService {
 
     const userId = authData.user.id;
     try {
-      // The SQL function creates both rows in one database transaction.
-      const { error } = await this.supabase.getAdminClient().rpc('initialize_trial_account', {
+      // Registration creates a pending profile only; no entitlement is provisioned.
+      const { error } = await this.supabase.getAdminClient().rpc('initialize_account', {
         p_user_id: userId, p_email: dto.email, p_full_name: dto.salonName,
       });
       if (error) throw error;
@@ -53,9 +56,9 @@ export class AuthService {
       } catch {
         this.logger.error('Không thể hoàn tác Auth user sau đăng ký lỗi: ' + userId);
       }
-      throw new InternalServerErrorException('Chưa thể khởi tạo hồ sơ và gói dùng thử. Vui lòng liên hệ hỗ trợ.');
+      throw new InternalServerErrorException('Chưa thể khởi tạo hồ sơ tài khoản. Vui lòng liên hệ hỗ trợ.');
     }
-    return { success: true, message: 'Đăng ký thành công! Bạn có 14 ngày trải nghiệm.' };
+    return { success: true, message: 'Đăng ký thành công. Tài khoản cần được quản trị viên phê duyệt và cấp gói dịch vụ trước khi sử dụng.' };
   }
 
   async forgotPassword(email: string) {
@@ -68,6 +71,11 @@ export class AuthService {
     if (typeof dto.deviceFingerprint !== 'string' || !dto.deviceFingerprint.trim() || dto.deviceFingerprint.length > 256) {
       throw new BadRequestException('Không lấy được mã định danh thiết bị. Vui lòng mở ứng dụng desktop.');
     }
+    for (const [value, max, optional] of [[dto.deviceName,128,false],[dto.platform,32,false],[dto.clientVersion ?? '',64,true]] as const) {
+      if (typeof value !== 'string' || value.length > max || (!optional && !value.trim())) {
+        throw new BadRequestException('Thông tin thiết bị không hợp lệ.');
+      }
+    }
     const authClient = this.supabase.createAuthClient();
     const { data: authData, error: authError } = await authClient.auth.signInWithPassword({
       email: dto.email, password: dto.password,
@@ -78,37 +86,43 @@ export class AuthService {
 
     const userId = authData.user.id;
     const admin = this.supabase.getAdminClient();
-    // Row locking in SQL makes counting + inserting atomic across backend processes.
-    const { data: deviceId, error: deviceError } = await admin.rpc('register_device', {
+    const sessionTokenHash = crypto.createHash('sha256').update(crypto.randomBytes(32)).digest('hex');
+    // Approval, paid entitlement, binding and session replacement share one transaction.
+    const { data: deviceId, error: sessionError } = await admin.rpc('open_account_session', {
       p_user_id: userId,
       p_fingerprint: dto.deviceFingerprint.trim(),
       p_device_name: dto.deviceName,
       p_platform: dto.platform,
+      p_session_hash: sessionTokenHash,
+      p_client_version: dto.clientVersion ?? null,
     });
-    if (deviceError?.message === 'DEVICE_LIMIT_EXCEEDED') {
-      throw new UnauthorizedException({
-        code: 'DEVICE_LIMIT_EXCEEDED', message: 'Tài khoản đã đạt giới hạn tối đa 2 thiết bị.',
-      });
-    }
-    if (deviceError || !deviceId) {
-      throw new InternalServerErrorException('Không thể kiểm tra hoặc đăng ký thiết bị. Vui lòng liên hệ hỗ trợ.');
-    }
-
-    const sessionTokenHash = crypto.createHash('sha256').update(crypto.randomBytes(32)).digest('hex');
-    const { error: sessionError } = await admin.from('active_sessions').upsert({
-      user_id: userId,
-      device_id: deviceId,
-      session_token_hash: sessionTokenHash,
-      client_version: '2.0.0',
-      last_heartbeat: new Date().toISOString(),
-    }, { onConflict: 'user_id' });
-    if (sessionError) {
-      throw new InternalServerErrorException('Không thể khởi tạo phiên làm việc. Vui lòng liên hệ hỗ trợ.');
-    }
+    if (sessionError || !deviceId) throwAccessError(sessionError);
 
     return {
       accessToken: this.jwtService.sign({ sub: userId, email: authData.user.email, deviceId, sessionTokenHash }),
       user: { id: userId, email: authData.user.email },
     };
+  }
+
+  async session(user: { sub: string; sessionTokenHash: string; deviceId: string }, fingerprint: unknown) {
+    if (typeof fingerprint !== 'string' || !fingerprint.trim() || fingerprint.length > 256) throw new BadRequestException('Thiếu mã định danh thiết bị.');
+    const subscriptionExpiresAt = await this.access.verify(user.sub, user.sessionTokenHash, user.deviceId, fingerprint.trim());
+    return { valid: true, subscriptionExpiresAt };
+  }
+
+  async logout(authorization: string | undefined) {
+    const token = authorization?.match(/^Bearer (\S+)$/i)?.[1];
+    if (!token) throw new UnauthorizedException('Thiếu token đăng xuất.');
+    let payload: { sub: string; sessionTokenHash: string };
+    try {
+      // Expired access tokens may ONLY revoke their own matching session; never grant access.
+      payload = this.jwtService.verify(token, { ignoreExpiration: true });
+      if (!payload.sub || !payload.sessionTokenHash) throw new Error('Invalid payload');
+    } catch { throw new UnauthorizedException('Token đăng xuất không hợp lệ.'); }
+    const { error } = await this.supabase.getAdminClient().rpc('close_account_session', {
+      p_user_id: payload.sub, p_session_hash: payload.sessionTokenHash,
+    });
+    if (error) throw new InternalServerErrorException('Chưa thể kết thúc phiên. Vui lòng thử lại.');
+    return { success: true };
   }
 }
