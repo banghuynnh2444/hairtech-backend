@@ -95,26 +95,33 @@ function validateProject(value: unknown): asserts value is ProjectDataV1 {
 export function validateDiagram(value: unknown, create: true): CreateDiagramDto;
 export function validateDiagram(value: unknown, create: false): UpdateDiagramDto;
 export function validateDiagram(value: unknown, create: boolean): CreateDiagramDto | UpdateDiagramDto {
-  if (!object(value)) fail('Dữ liệu sơ đồ phải là một object.');
-  keys(value, ['client_id', 'type', 'name', 'notes', 'thumbnail_url', 'project_data']);
-  if (!create && Object.keys(value).length === 0) fail('Chưa có trường nào cần cập nhật.');
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    fail('Dữ liệu sơ đồ phải là một object.');
+  }
+  const record = value as Record<string, unknown>;
+  const allowed = ['client_id', 'type', 'name', 'notes', 'thumbnail_url', 'project_data'];
+  keys(record, allowed);
+  const provided = (key: string) => record[key] !== undefined;
+  if (!create && !allowed.some(provided)) fail('Chưa có trường nào cần cập nhật.');
   for (const [key, max] of [['type', 64], ['name', 200]] as const) {
-    if (create || Object.hasOwn(value, key)) {
-      if (typeof value[key] !== 'string' || !value[key].trim() || value[key].length > max) fail(`${key} không hợp lệ.`);
+    if (create || provided(key)) {
+      if (typeof record[key] !== 'string' || !record[key].trim() || record[key].length > max) fail(`${key} không hợp lệ.`);
     }
   }
-  if (Object.hasOwn(value, 'client_id') && value.client_id !== null
-    && (typeof value.client_id !== 'string' || !value.client_id.trim() || value.client_id.length > 256)) fail('client_id không hợp lệ.');
-  if (Object.hasOwn(value, 'notes') && value.notes !== null && (typeof value.notes !== 'string' || value.notes.length > 20000)) fail('Ghi chú không hợp lệ.');
-  if (Object.hasOwn(value, 'thumbnail_url') && value.thumbnail_url !== null) {
-    if (typeof value.thumbnail_url !== 'string' || value.thumbnail_url.length > 2048) fail('Đường dẫn ảnh không hợp lệ.');
+  if (provided('client_id') && record.client_id !== null
+    && (typeof record.client_id !== 'string' || !record.client_id.trim() || record.client_id.length > 256)) fail('client_id không hợp lệ.');
+  if (provided('notes') && record.notes !== null && (typeof record.notes !== 'string' || record.notes.length > 20000)) fail('Ghi chú không hợp lệ.');
+  if (provided('thumbnail_url') && record.thumbnail_url !== null) {
+    if (typeof record.thumbnail_url !== 'string' || record.thumbnail_url.length > 2048) fail('Đường dẫn ảnh không hợp lệ.');
     try {
-      const url = new URL(value.thumbnail_url);
+      const url = new URL(record.thumbnail_url);
       if (url.protocol !== 'https:' || url.username || url.password) fail('Ảnh thu nhỏ cần URL HTTPS.');
     } catch { fail('Ảnh thu nhỏ cần URL HTTPS, không phải base64.'); }
   }
-  if (create || Object.hasOwn(value, 'project_data')) validateProject(value.project_data);
-  return value as unknown as CreateDiagramDto | UpdateDiagramDto;
+  if (create || provided('project_data')) validateProject(record.project_data);
+  return Object.fromEntries(
+    Object.entries(record).filter(([, field]) => field !== undefined),
+  ) as unknown as CreateDiagramDto | UpdateDiagramDto;
 }
 @Injectable()
 export class DiagramValidationPipe implements PipeTransform {

@@ -44,4 +44,9 @@ describe('Diagram storage validation', () => {
     expect(() => pipe.transform({}, { type: 'body', metatype: UpdateDiagramDto })).toThrow();
     expect(pipe.transform('text-id', { type: 'param', metatype: String })).toBe('text-id');
   });
+  it('accepts a partial update after the global transform creates undefined class fields', () => {
+    const transformed = Object.assign(new UpdateDiagramDto(), { name: 'Tên mới' });
+    expect(validateDiagram(transformed, false)).toEqual({ name: 'Tên mới' });
+    expect(() => validateDiagram(new UpdateDiagramDto(), false)).toThrow('Chưa có trường');
+  });
 });

@@ -51,12 +51,13 @@ export function validateClient(
   if (Object.keys(record).some((key) => !allowed.includes(key))) {
     fail('Thông tin khách hàng chứa trường không được hỗ trợ.');
   }
-  if (!create && Object.keys(record).length === 0) {
+  const provided = (key: string) => record[key] !== undefined;
+  if (!create && !allowed.some(provided)) {
     fail('Chưa có thông tin khách hàng cần cập nhật.');
   }
 
   const result: UpdateClientDto = {};
-  if (create || Object.hasOwn(record, 'name')) {
+  if (create || provided('name')) {
     result.name = validateText(
       record.name,
       'Tên khách hàng',
@@ -64,10 +65,10 @@ export function validateClient(
       true,
     ) as string;
   }
-  if (Object.hasOwn(record, 'phone')) {
+  if (provided('phone')) {
     result.phone = validateText(record.phone, 'Số điện thoại', 32, false);
   }
-  if (Object.hasOwn(record, 'note')) {
+  if (provided('note')) {
     result.note = validateText(record.note, 'Ghi chú', 5_000, false);
   }
   return result as CreateClientDto | UpdateClientDto;

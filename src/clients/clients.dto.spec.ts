@@ -1,4 +1,4 @@
-import { validateClient } from './clients.dto';
+import { UpdateClientDto, validateClient } from './clients.dto';
 
 describe('client DTO validation', () => {
   it('normalizes supported customer fields', () => {
@@ -21,5 +21,15 @@ describe('client DTO validation', () => {
       'không được để trống',
     );
     expect(() => validateClient({}, false)).toThrow('Chưa có thông tin');
+  });
+
+  it('accepts a partial update after the global transform creates undefined class fields', () => {
+    const transformed = Object.assign(new UpdateClientDto(), {
+      phone: ' 0902 ',
+    });
+    expect(validateClient(transformed, false)).toEqual({ phone: '0902' });
+    expect(() => validateClient(new UpdateClientDto(), false)).toThrow(
+      'Chưa có thông tin',
+    );
   });
 });
