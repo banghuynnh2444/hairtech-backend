@@ -92,7 +92,7 @@ export class ClientsService {
       if (error.code === '23503') {
         throw new ConflictException({
           code: 'CLIENT_HAS_PROJECTS',
-          message: 'Hãy xóa các project của khách hàng trước khi xóa hồ sơ.',
+          message: 'Hãy xóa các project và ảnh của khách hàng trước khi xóa hồ sơ.',
         });
       }
       throw error;

@@ -8,6 +8,7 @@ import { LicenseModule } from './license/license.module';
 import { ClientsModule } from './clients/clients.module';
 import { DiagramsModule } from './diagrams/diagrams.module';
 import { AccountAccessModule } from './access/account-access.module';
+import { PhotosModule } from './photos/photos.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { AccountAccessModule } from './access/account-access.module';
     LicenseModule,
     ClientsModule,
     DiagramsModule,
+    PhotosModule,
   ],
   controllers: [AppController],
   providers: [AppService],
