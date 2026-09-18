@@ -78,4 +78,90 @@ describe('PhotosService', () => {
     }));
     expect(result).toMatchObject({ url: 'https://signed.invalid/photo', storage_path: path });
   });
+
+  it('rejects reference photo uploads when client reaches MAX_REFERENCE_PHOTOS limit', async () => {
+    const clients = { findOne: jest.fn().mockResolvedValue({ id: 'client-1' }) };
+    const countQuery: Record<string, jest.Mock> = {};
+    countQuery.select = jest.fn(() => countQuery);
+    countQuery.eq = jest.fn(() => countQuery);
+    (countQuery as any).count = 20;
+    (countQuery as any).error = null;
+
+    const from = jest.fn().mockReturnValue(countQuery);
+    const admin = { from, storage: { from: jest.fn() } };
+    const service = new PhotosService(
+      { getAdminClient: () => admin } as unknown as SupabaseService,
+      clients as unknown as ClientsService,
+    );
+
+    await expect(
+      service.upload('client-1', 'owner', 'reference', jpeg('sample.jpg')),
+    ).rejects.toThrow('Mỗi khách hàng chỉ được lưu tối đa 20 ảnh tham khảo.');
+    expect(admin.storage.from).not.toHaveBeenCalled();
+  });
+
+  it('removes photo from database and storage bucket', async () => {
+    const clients = { findOne: jest.fn().mockResolvedValue({ id: 'client-1' }) };
+    const findQuery: Record<string, jest.Mock> = {};
+    findQuery.select = jest.fn(() => findQuery);
+    findQuery.eq = jest.fn(() => findQuery);
+    findQuery.maybeSingle = jest.fn().mockResolvedValue({
+      data: { id: 'photo-1', storage_path: 'users/owner/clients/client-1/before/p1.jpg' },
+      error: null,
+    });
+
+    const deleteQuery: Record<string, jest.Mock> = {};
+    deleteQuery.delete = jest.fn(() => deleteQuery);
+    deleteQuery.eq = jest.fn(() => deleteQuery);
+    (deleteQuery as any).error = null;
+
+    const from = jest.fn()
+      .mockReturnValueOnce(findQuery)
+      .mockReturnValueOnce(deleteQuery);
+
+    const bucket = { remove: jest.fn().mockResolvedValue({ error: null }) };
+    const admin = { from, storage: { from: jest.fn(() => bucket) } };
+    const service = new PhotosService(
+      { getAdminClient: () => admin } as unknown as SupabaseService,
+      clients as unknown as ClientsService,
+    );
+
+    const result = await service.remove('client-1', 'photo-1', 'owner');
+    expect(result).toEqual({ success: true });
+    expect(bucket.remove).toHaveBeenCalledWith(['users/owner/clients/client-1/before/p1.jpg']);
+  });
+
+  it('lists client photos with signed URLs', async () => {
+    const clients = { findOne: jest.fn().mockResolvedValue({ id: 'client-1' }) };
+    const listQuery: Record<string, jest.Mock> = {};
+    listQuery.select = jest.fn(() => listQuery);
+    listQuery.eq = jest.fn(() => listQuery);
+    listQuery.order = jest.fn().mockResolvedValue({
+      data: [
+        { id: 'photo-1', storage_path: 'users/owner/clients/client-1/before/p1.jpg', kind: 'before' },
+      ],
+      error: null,
+    });
+
+    const from = jest.fn().mockReturnValue(listQuery);
+    const bucket = {
+      createSignedUrl: jest.fn().mockResolvedValue({
+        data: { signedUrl: 'https://signed.invalid/p1' },
+        error: null,
+      }),
+    };
+    const admin = { from, storage: { from: jest.fn(() => bucket) } };
+    const service = new PhotosService(
+      { getAdminClient: () => admin } as unknown as SupabaseService,
+      clients as unknown as ClientsService,
+    );
+
+    const result = await service.list('client-1', 'owner');
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      id: 'photo-1',
+      url: 'https://signed.invalid/p1',
+      kind: 'before',
+    });
+  });
 });

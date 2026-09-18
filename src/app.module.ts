@@ -9,6 +9,7 @@ import { ClientsModule } from './clients/clients.module';
 import { DiagramsModule } from './diagrams/diagrams.module';
 import { AccountAccessModule } from './access/account-access.module';
 import { PhotosModule } from './photos/photos.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { PhotosModule } from './photos/photos.module';
     ClientsModule,
     DiagramsModule,
     PhotosModule,
+    AdminModule,
   ],
   controllers: [AppController],
   providers: [AppService],

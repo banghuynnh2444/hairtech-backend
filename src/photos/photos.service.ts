@@ -11,6 +11,7 @@ import { ClientsService } from '../clients/clients.service';
 import { SupabaseService } from '../supabase/supabase.service';
 
 export const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
+export const MAX_REFERENCE_PHOTOS = 20;
 const BUCKET = 'client-photos';
 const SIGNED_URL_SECONDS = 15 * 60;
 const PHOTO_COLUMNS = 'id,user_id,client_id,kind,storage_path,original_name,mime_type,size_bytes,created_at,updated_at';
@@ -123,7 +124,19 @@ export class PhotosService {
     const admin = this.supabase.getAdminClient();
 
     let existing: Record<string, any> | null = null;
-    if (kind !== 'reference') {
+    if (kind === 'reference') {
+      const countResult = await admin.from('client_photos')
+        .select('id', { count: 'exact', head: true })
+        .eq('client_id', clientId)
+        .eq('user_id', userId)
+        .eq('kind', 'reference');
+      if (countResult.error) throw countResult.error;
+      if ((countResult.count ?? 0) >= MAX_REFERENCE_PHOTOS) {
+        throw new BadRequestException(
+          `Mỗi khách hàng chỉ được lưu tối đa ${MAX_REFERENCE_PHOTOS} ảnh tham khảo. Vui lòng xóa bớt ảnh cũ trước khi tải thêm.`,
+        );
+      }
+    } else {
       const result = await admin.from('client_photos')
         .select(PHOTO_COLUMNS)
         .eq('client_id', clientId)
