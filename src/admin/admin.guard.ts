@@ -46,7 +46,7 @@ export class AdminGuard implements CanActivate {
       throw new ForbiddenException('Không thể xác thực vai trò quản trị viên.');
     }
 
-    if (profile.role === 'admin' || profile.role === 'super_admin') {
+    if (profile.role === 'super_admin') {
       req.user.isAdmin = true;
       return true;
     }
