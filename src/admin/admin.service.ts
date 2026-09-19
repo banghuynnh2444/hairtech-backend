@@ -48,12 +48,37 @@ export class AdminService {
       .order('created_at', { ascending: false });
 
     if (query.search && query.search.trim()) {
-      const term = `%${query.search.trim()}%`;
-      profilesQuery = profilesQuery.or(`email.ilike.${term},full_name.ilike.${term}`);
+      const cleanSearch = query.search.trim().replace(/[,()]/g, '');
+      if (cleanSearch) {
+        const term = `%${cleanSearch}%`;
+        profilesQuery = profilesQuery.or(`email.ilike.${term},full_name.ilike.${term}`);
+      }
     }
 
     if (query.status === 'pending') {
       profilesQuery = profilesQuery.eq('is_approved', false);
+    } else if (query.status === 'active') {
+      const { data: activeSubs } = await admin
+        .from('subscriptions')
+        .select('user_id')
+        .eq('status', 'active')
+        .gt('current_period_end', new Date().toISOString());
+
+      const activeUserIds = (activeSubs || []).map((s) => s.user_id);
+      profilesQuery = profilesQuery
+        .eq('is_approved', true)
+        .in('id', activeUserIds.length > 0 ? activeUserIds : ['00000000-0000-0000-0000-000000000000']);
+    } else if (query.status === 'expired') {
+      const { data: activeSubs } = await admin
+        .from('subscriptions')
+        .select('user_id')
+        .eq('status', 'active')
+        .gt('current_period_end', new Date().toISOString());
+
+      const activeUserIds = (activeSubs || []).map((s) => s.user_id);
+      if (activeUserIds.length > 0) {
+        profilesQuery = profilesQuery.not('id', 'in', `(${activeUserIds.join(',')})`);
+      }
     }
 
     const page = query.page ?? 1;
@@ -127,20 +152,9 @@ export class AdminService {
       };
     });
 
-    let filteredItems = items;
-    if (query.status === 'active') {
-      filteredItems = items.filter(
-        (i) => i.isApproved && i.subscription && !i.subscription.isExpired,
-      );
-    } else if (query.status === 'expired') {
-      filteredItems = items.filter(
-        (i) => !i.subscription || i.subscription.isExpired,
-      );
-    }
-
     return {
-      users: filteredItems,
-      total: count ?? filteredItems.length,
+      users: items,
+      total: count ?? items.length,
       page,
       limit,
     };
@@ -158,14 +172,14 @@ export class AdminService {
         .eq('is_approved', false),
       admin
         .from('subscriptions')
-        .select('id, status, current_period_end')
+        .select('id', { count: 'exact', head: true })
         .eq('status', 'active')
         .gt('current_period_end', now),
     ]);
 
     const totalUsers = profilesRes.count ?? 0;
     const pendingApprovals = pendingRes.count ?? 0;
-    const activeSubscribers = subsRes.data?.length ?? 0;
+    const activeSubscribers = subsRes.count ?? subsRes.data?.length ?? 0;
     const expiredSubscribers = Math.max(0, totalUsers - pendingApprovals - activeSubscribers);
 
     return {
